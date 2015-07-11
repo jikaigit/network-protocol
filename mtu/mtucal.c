@@ -3,20 +3,29 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netdb.h>
 
-// IP数据包首部
+// 用来解析数据包
 typedef struct {
-    unsigned char  ver_and_ihl;
+    // IP部分
+    unsigned char  ver_and_headlen;
     unsigned char  tos;
     unsigned short total_len;
     unsigned short id;
-    unsigned short flag_and_offset; // 16384
+    unsigned short flag_and_offset;
     unsigned char  ttl;
     unsigned char  protocol;
     unsigned short checksum;
     unsigned int   src_ip;
     unsigned int   dst_ip;
-}ip_header;
+
+    // ICMP部分
+    unsigned char  icmp_type;
+    unsigned char  icmp_code;
+    unsigned short icmp_checksum;
+    unsigned short icmp_id;
+    unsigned short icmp_seq;
+}parse_header;
 
 // ICMP数据包首部
 typedef struct {
@@ -30,7 +39,7 @@ typedef struct {
 // 网际校验和算法
 unsigned short checksum(unsigned short *buf,int nword) {
     unsigned long sum;
-    for(sum=0;nword>0;nword--) sum += *buf++;
+    for(sum = 0; nword > 0; nword--) sum += *buf++;
     sum = (sum>>16) + (sum&0xffff);
     sum += (sum>>16);
     return ~sum;
@@ -38,70 +47,60 @@ unsigned short checksum(unsigned short *buf,int nword) {
 
 // 这个函数用来测量到某个目标机器的网络的MTU
 int calcu_mtu(char* target_addr) {
-    char buffer[65536] = {0};
+    char buffer[65535] = {0};
     int sockfd;
     struct sockaddr_in addr;
+    struct sockaddr_in from;
 
     if ((sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0) {
         printf("不能创建原始套接字\r\n");
         return -1;
     }
 
-    int set = 1;
-    setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, (void*)&set, sizeof(int));
+    int val = IP_PMTUDISC_DO;
+    setsockopt(sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(val));
 
+    bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(target_addr);
 
-    ip_header iph;
-    iph.ver_and_ihl     = (4<<4)+5;
-    iph.tos             = 0;
-    iph.total_len       = htons(28);
-    iph.id              = htons(0);
-    iph.flag_and_offset = htons(16384);
-    iph.ttl             = 64;
-    iph.protocol        = IPPROTO_ICMP;
-    iph.checksum        = 0;
-    iph.src_ip          = inet_addr("192.168.137.211");
-    iph.dst_ip          = inet_addr(target_addr);
-    memcpy(buffer, &iph, sizeof(ip_header));
-    iph.checksum = htons(checksum((short*)buffer, sizeof(ip_header)));
+    icmp_header *icmph = (icmp_header*)buffer;
+    icmph->type     = 8;
+    icmph->code     = 0;
+    icmph->checksum = 0;
+    icmph->id       = htons(0);
+    icmph->seq      = htons(0);
+    icmph->checksum = checksum((short*)buffer, sizeof(icmp_header));
 
-    icmp_header icmph;
-    icmph.type     = 8;
-    icmph.code     = 0;
-    icmph.checksum = 0;
-    icmph.id       = 0;
-    icmph.seq      = 0;
-    memcpy(buffer, &iph, sizeof(icmp_header));
-    icmph.checksum = checksum((short*)buffer, sizeof(icmp_header));
+    int sin_size = sizeof(struct sockaddr);
+    int send_len;
+    int recv_len;
+    int mtu = 5000;
+    struct sockaddr_in fromaddr;
+    for (;;) {
+        send_len = sendto(sockfd, buffer, sizeof(icmp_header), 0, (struct sockaddr*)&addr, sizeof(struct sockaddr));
+        if (send_len <= 0) {
+            printf("发送数据失败\r\n");
+            close(sockfd);
+            return -1;
+        }
 
-    memcpy(buffer, &iph, sizeof(ip_header));
-    memcpy(buffer+sizeof(ip_header), &icmph, sizeof(icmp_header));
-
-    // debug portion...
-    int i = 0;
-    printf("version: %d\r\n", buffer[0]>>4);
-    printf("length of head: %d\r\n", buffer[0]&0xF);
-    printf("type of service:　%d\r\n", buffer[1]);
-    printf("total of length: %d\r\n", ((short)buffer[2]<<8)+buffer[3]);
-    printf("identifier: %d\r\n", ((short)buffer[4]<<8)+buffer[5]);
-    printf("flag and offset: %d\r\n", ((short)buffer[6]<<8)+buffer[7]);
-    printf("time to live: %d\r\n", buffer[8]);
-    printf("protocol: %d\r\n", buffer[9]);
-    printf("check sum: %d\r\n", ((short)buffer[10]<<8)+buffer[11]);
-    printf("source ip: %u.%u.%u.%u\r\n", );
-    return -1;
-
-    int send_len = sendto(sockfd, buffer, sizeof(ip_header), 0, (struct sockaddr*)&addr, sizeof(struct sockaddr));
-    if (send_len <= 0) {
-        printf("发送数据失败\r\n");
-        close(sockfd);
+        for (;;) {
+            recv_len = recvfrom(sockfd, buffer, 65534, 0, (struct sockaddr*)&from, &sin_size);
+            if (recv_len > 0) {
+                if (from.sin_addr.s_addr != addr.sin_addr.s_addr) {
+                    printf("不是想要的数据包\r\n");
+                    break;
+                } else {
+                    printf("是想要的包\r\n");
+                    break;
+                }
+            }
+        }
     }
-    printf("success\r\n");
 }
 
 int main(int argc, char* argv[]) {
-    calcu_mtu("204.79.197.200");
+    calcu_mtu("192.168.137.11");
     return 0;
 }

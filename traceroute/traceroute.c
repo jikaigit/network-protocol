@@ -14,8 +14,9 @@ typedef struct {
     unsigned char  type;
     unsigned char  code;
     unsigned short checksum;
-    unsigned int   reserved;
-}icmp_header;
+    unsigned short id;
+    unsigned short seq;
+}icmp_echo_header;
 
 int parse_icmp(char* buff, unsigned char rmtaddr[4]) {
     int iph_len   = buff[0] & 0xF;
@@ -30,54 +31,75 @@ int parse_icmp(char* buff, unsigned char rmtaddr[4]) {
     return NONE;
 }
 
+// 网际校验和算法
+unsigned short checksum(unsigned short *buf,int nword) {
+    unsigned long sum;
+    for(sum = 0; nword > 0; nword--) sum += *buf++;
+    sum = (sum>>16) + (sum&0xffff);
+    sum += (sum>>16);
+    return ~sum;
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         printf("usage: %s [ip|domain]\r\n", argv[0]);
         exit(EXIT_SUCCESS);
     }
 
-    int ttl     = 1;
-    int ttl_len = sizeof(int);
+    int send_sockfd;
     int recv_sockfd;
-    struct sockaddr_in lisaddr;
-    struct sockaddr_in addr;
+    struct sockaddr_in laddr;
+    struct sockaddr_in send_addr;
+    struct sockaddr_in from_addr;
 
+    // 设置接收套接字
     recv_sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (recv_sockfd < 0) {
-        printf("创建接受套接字失败\r\n");
+        printf("创建接收套接字失败\r\n");
         exit(EXIT_FAILURE);
     }
-    lisaddr.sin_family = AF_INET;
-    lisaddr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(recv_sockfd, (struct sockaddr*)&lisaddr, sizeof(struct sockaddr)) < 0) {
-        printf("绑定失败\r\n");
+    bzero(&laddr, sizeof(laddr));
+    laddr.sin_family = AF_INET;
+    laddr.sin_addr.s_addr = inet_addr("192.168.137.211");
+    /*if (bind(recv_sockfd, (struct sockaddr*)&laddr, sizeof(struct sockaddr)) < 0) {
+        printf("为接收套接字绑定地址失败\r\n");
+        close(recv_sockfd);
+        exit(EXIT_FAILURE);
+    }*/
+
+    // 设置发送套接字
+    send_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (send_sockfd < 0) {
+        printf("创建发送套接字失败\r\n");
         close(recv_sockfd);
         exit(EXIT_FAILURE);
     }
+    bzero(&send_addr, sizeof(send_addr));
+    send_addr.sin_family = AF_INET;
+    send_addr.sin_port   = htons(59801);
+    send_addr.sin_addr.s_addr = inet_addr(argv[1]);
 
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(64234);
-    addr.sin_addr.s_addr = inet_addr(argv[1]);
-    if (addr.sin_addr.s_addr == INADDR_NONE) {
-        struct hostent *ht = gethostbyname(argv[1]);
-        addr.sin_addr.s_addr = inet_addr(ht->h_addr_list[0]);
-    }
-
-    int  send_len     = 0;
-    int  recv_len     = 0;
-    char buffer[4096] = {0};
-    int  sin_size     = sizeof(struct sockaddr);
+    int   seq = 1;
+    int   ttl = 1;
+    int   ttl_size = sizeof(ttl);
+    int   send_len = 0;
+    int   recv_len = 0;
+    int   from_len = sizeof(from_addr);
+    pid_t pid      = getpid();
+    char  buffer[4096] = {0};
+    unsigned char rmtaddr[4];
     for (;;) {
-        int send_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-        if (send_sockfd < 0) {
-            printf("创建发送套接字失败\r\n");
-            close(recv_sockfd);
-            exit(EXIT_FAILURE);
-        }
-
+        // 设置数据包信息
         setsockopt(send_sockfd, IPPROTO_IP, IP_TTL, (void*)&ttl, sizeof(ttl));
+        icmp_echo_header *icmpechoh = (icmp_echo_header*)buffer;
+        icmpechoh->type     = 8;
+        icmpechoh->code     = 0;
+        icmpechoh->checksum = 0;
+        icmpechoh->id       = pid;
+        icmpechoh->seq      = seq;
+        icmpechoh->checksum = checksum((short*)buffer, sizeof(icmp_echo_header));
 
-        send_len = sendto(send_sockfd, "hello", 5, 0, (struct sockaddr*)&addr, sizeof(struct sockaddr));
+        send_len = sendto(send_sockfd, "hello", 5, 0, (struct sockaddr*)&send_addr, sizeof(struct sockaddr));
         if (send_len <= 0) {
             printf("发送数据失败\r\n");
             close(send_sockfd);
@@ -86,35 +108,15 @@ int main(int argc, char* argv[]) {
         }
 
         // 根据返回的数据包判定是否应该输出当前主机
-        recv_len = recvfrom(recv_sockfd, buffer, 4096, 0, (struct sockaddr*)&addr, &sin_size);
-        if (recv_len <= 0) {
-            printf("接受数据失败\r\n");
-            close(send_sockfd);
-            close(recv_sockfd);
-            exit(EXIT_FAILURE);
+        for (;;) {
+            recv_len = recvfrom(recv_sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&from_addr, &from_len);
+            if (recv_len > 0) {
+                printf("接收到了数据\r\n");
+                return 0;
+            }
         }
-        buffer[recv_len] = '\0';
-        unsigned char rmtaddr[4] = {0};
-        switch (parse_icmp(buffer, rmtaddr)) {
-        case OVER_TIME:
-            printf("中途路由:%u.%u.%u.%u\r\n", rmtaddr[0], rmtaddr[1], rmtaddr[2], rmtaddr[3]);
-            break;
-
-        case CAN_NOT_ARRIVE:
-            printf("目标主机:%u.%u.%u.%u\r\n", rmtaddr[0], rmtaddr[1], rmtaddr[2], rmtaddr[3]);
-            close(send_sockfd);
-            close(recv_sockfd);
-            return 0;
-
-        case NONE:
-            printf("不是预期的ICMP类型\r\n");
-            close(send_sockfd);
-            close(recv_sockfd);
-            exit(EXIT_FAILURE);
-        }
-
-        close(send_sockfd);
         ttl++;
+        seq++;
     }
 
     return 0;
