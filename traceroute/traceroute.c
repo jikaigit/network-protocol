@@ -39,11 +39,19 @@ int main(int argc, char* argv[]) {
     int ttl     = 1;
     int ttl_len = sizeof(int);
     int recv_sockfd;
+    struct sockaddr_in lisaddr;
     struct sockaddr_in addr;
 
     recv_sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (recv_sockfd < 0) {
         printf("创建接受套接字失败\r\n");
+        exit(EXIT_FAILURE);
+    }
+    lisaddr.sin_family = AF_INET;
+    lisaddr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(recv_sockfd, (struct sockaddr*)&lisaddr, sizeof(struct sockaddr)) < 0) {
+        printf("绑定失败\r\n");
+        close(recv_sockfd);
         exit(EXIT_FAILURE);
     }
 
