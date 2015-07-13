@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -12,6 +13,7 @@ int main(int argc, char* argv[]) {
         exit(EXIT_SUCCESS);
     }
 
+    char buff[4096] = {0};
     int client_sockfd;
     struct sockaddr_in connect_addr;
 
@@ -37,6 +39,12 @@ int main(int argc, char* argv[]) {
         close(client_sockfd);
         exit(EXIT_FAILURE);
     }
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) {
+        printf("无法找到文件，文件可能不存在或文件损坏\r\n");
+        close(client_sockfd);
+        exit(EXIT_FAILURE);
+    }
 
     // 先发送文件的文件名，好让服务器创建这个文件
     int send_len = strlen(filename);
@@ -45,21 +53,15 @@ int main(int argc, char* argv[]) {
         close(client_sockfd);
         exit(EXIT_FAILURE);
     }
-    if (send(client_sockfd, filename, send_len, 0) <= 0) {
-        printf("发送文件名失败");
-        close(client_sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-    FILE* file = fopen(filename, "r");
-    if (file == NULL) {
-        printf("无法找到文件，文件可能不存在或文件损坏\r\n");
+    send_len = sprintf(buff, "%s/", filename);
+    buff[send_len] = '\0';
+    if (send(client_sockfd, buff, send_len, 0) <= 0) {
+        printf("发送文件名失败\r\n");
         close(client_sockfd);
         exit(EXIT_FAILURE);
     }
 
     // 开始发送文件的数据
-    char buff[4096];
     char ch = 0;
     int  i  = 0;
     int  read_len = 0;

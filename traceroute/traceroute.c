@@ -122,10 +122,6 @@ int main(int argc, char* argv[]) {
         printf("创建接收套接字失败\r\n");
         exit(EXIT_FAILURE);
     }
-    struct timeval timeout;
-    timeout.tv_sec  = 0;
-    timeout.tv_usec = 100;
-    //setsockopt(recv_sockfd, SOL_SOCKET, )
 
     // 设置发送套接字
     send_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
@@ -136,7 +132,7 @@ int main(int argc, char* argv[]) {
     }
     bzero(&send_addr, sizeof(send_addr));
     send_addr.sin_family = AF_INET;
-    send_addr.sin_port   = htons(59801);
+    send_addr.sin_port   = htons(56463);
     send_addr.sin_addr.s_addr = inet_addr(argv[1]);
 
     int   ttl = 1;
@@ -159,7 +155,7 @@ int main(int argc, char* argv[]) {
         }
 
         ttl++;
-        if (ttl == 255) {
+        if (ttl == 50) {
             break;
         }
     }
@@ -176,7 +172,7 @@ int main(int argc, char* argv[]) {
             }
             if (pheader.icmph.type == 11) {
                 printf("中途路由: %s\r\n", inet_ntoa(from_addr.sin_addr));
-            } else if (pheader.icmph.type == 3 && pheader.icmph.code == 3) {
+            } else if (pheader.icmph.type == 3) {
                 printf("目标主机: %s\r\n", inet_ntoa(from_addr.sin_addr));
             }
         }
