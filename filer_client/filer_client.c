@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
 
     connect_addr.sin_family = AF_INET;
     connect_addr.sin_port = htons(FILER_SERVER_PORT);
-    connect_addr.sin_addr.s_addr = inet_addr("192.168.137.211");
+    connect_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     if (connect(client_sockfd, (struct sockaddr*)&connect_addr, sizeof(struct sockaddr)) < 0) {
         printf("连接失败\r\n");

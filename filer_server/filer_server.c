@@ -40,10 +40,14 @@ void* file_recv(void* arg) {
         }
         // 第一次接收要解析文件名
         if (first == 1) {
-            for (i = 0; i < recv_len; i++) {
+            for (i = 0; ; i++) {
                 if (buff[i] == '/') {
+                    first = 0;
                     i++;
                     break;
+                }
+                if (i >= recv_len) {
+                    continue;
                 }
                 filename[filename_i] = buff[i];
                 filename_i++;

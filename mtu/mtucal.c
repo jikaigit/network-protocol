@@ -137,7 +137,17 @@ int main(int argc, char* argv[]) {
     bzero(&recv_addr, sizeof(send_addr));
 
     send_addr.sin_family = AF_INET;
-    send_addr.sin_addr.s_addr = inet_addr(argv[1]);
+    if (inet_addr(argv[1]) != INADDR_NONE) {
+        send_addr.sin_addr.s_addr = inet_addr(argv[1]);
+    } else {
+        struct hostent* hp = gethostbyname(argv[1]);
+        if (hp == NULL) {
+            printf("域名解析失败\r\n");
+            close(sockfd);
+            exit(EXIT_FAILURE);
+        }
+        send_addr.sin_addr = (*(struct in_addr*)hp->h_addr_list[0]);
+    }
 
     int set = IP_PMTUDISC_DO;
     setsockopt(sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &set, sizeof(set));
@@ -166,7 +176,7 @@ int main(int argc, char* argv[]) {
         // debug
         printf("本次发送长度: %d\r\n", mtu_val+34);
 
-        send_len = sendto(sockfd, send_buff, mtu_val, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
+        send_len = sendto(recv_sockfd, send_buff, mtu_val, 0, (struct sockaddr*)&send_addr, sizeof(send_addr));
         if (send_len < 0) {
             printf("发送数据失败\r\n");
             close(sockfd);

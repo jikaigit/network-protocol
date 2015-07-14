@@ -124,7 +124,7 @@ int main(int argc, char* argv[]) {
     }
 
     // 设置发送套接字
-    send_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    send_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (send_sockfd < 0) {
         printf("创建发送套接字失败\r\n");
         close(recv_sockfd);
@@ -133,7 +133,18 @@ int main(int argc, char* argv[]) {
     bzero(&send_addr, sizeof(send_addr));
     send_addr.sin_family = AF_INET;
     send_addr.sin_port   = htons(56463);
-    send_addr.sin_addr.s_addr = inet_addr(argv[1]);
+    if (inet_addr(argv[1]) != INADDR_NONE) {
+        send_addr.sin_addr.s_addr = inet_addr(argv[1]);
+    } else {
+        struct hostent* hp = gethostbyname(argv[1]);
+        if (hp == NULL) {
+            printf("域名解析失败\r\n");
+            close(recv_sockfd);
+            close(send_sockfd);
+            exit(EXIT_FAILURE);
+        }
+        send_addr.sin_addr = (*(struct in_addr*)hp->h_addr_list[0]);
+    }
 
     int   ttl = 1;
     int   ttl_size = sizeof(ttl);
@@ -172,9 +183,11 @@ int main(int argc, char* argv[]) {
             }
             if (pheader.icmph.type == 11) {
                 printf("中途路由: %s\r\n", inet_ntoa(from_addr.sin_addr));
-            } else if (pheader.icmph.type == 3) {
-                printf("目标主机: %s\r\n", inet_ntoa(from_addr.sin_addr));
             }
+            /*else if (pheader.icmph.type == 3 && pheader.icmph.code == 3) {
+                printf("目标主机: %s\r\n", inet_ntoa(from_addr.sin_addr));
+            }*/
+            printf("ICMP type: %d\r\n", pheader.icmph.type);
         }
     }
 
